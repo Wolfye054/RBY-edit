@@ -9,12 +9,28 @@
 #define CHECKSUM_END_ADDR 0x3522
 
 #define PLAYER_NAME_ADDR 0x2598
+#define ENEMY_NAME_ADDR 0x25F6
 #define MONEY_ADDR 0x25F3
+#define BAG_ADDR 0x25C9
+
+typedef struct
+{
+	int id;
+	int count;
+} ListEntry;
+
+typedef struct
+{
+	int count;
+	ListEntry *entries;
+} List;
 
 typedef struct
 {
 	char *player_name;
+	char *rival_name;
 	int money;
+	List bag;
 } SaveData;
 
 uint8_t ascii_to_rby(uint8_t c)
@@ -39,6 +55,25 @@ uint8_t rby_to_ascii(uint8_t c)
 	return c;
 }
 
+List get_bag(uint8_t *save)
+{
+	List list;
+	list.count = save[BAG_ADDR];
+	list.entries = malloc(20 * sizeof(ListEntry));
+
+	int addr = BAG_ADDR + 1;
+	for(int i = 0; i < list.count; i++)
+	{
+		ListEntry entry;
+		entry.id = save[addr];
+		entry.count = save[addr + 1];
+		list.entries[i] = entry;
+		addr += 2;
+	}
+
+	return list;
+}
+
 int get_money(uint8_t *save)
 {
 	uint32_t bcd = *(uint32_t *)(save + MONEY_ADDR);
@@ -56,6 +91,22 @@ int get_money(uint8_t *save)
 	}
 
 	return money;
+}
+
+char *get_rival_name(uint8_t *save)
+{
+	char *name = malloc(8);
+	assert(name);
+
+	int i;
+	for(i = 0; save[ENEMY_NAME_ADDR+ i] != 0x50; i++)
+	{
+		name[i] = rby_to_ascii(save[ENEMY_NAME_ADDR + i]);
+	}
+	name[i] = '\0';
+
+	return name;
+
 }
 
 char *get_player_name(uint8_t *save)
@@ -85,6 +136,29 @@ void set_checksum(uint8_t *save)
 	}
 
 	save[CHECKSUM_ADDR] = ~checksum;
+}
+
+void set_bag(uint8_t *save, List bag)
+{
+	save[BAG_ADDR] = bag.count;
+	int addr = BAG_ADDR + 1;
+
+	if(bag.count == 0)
+	{
+		save[addr] = 0xFF;
+	}
+	else
+	{
+		for(int i = 0; i < bag.count; i++)
+		{
+			ListEntry entry = bag.entries[i];
+			save[addr] = entry.id;
+			save[addr + 1] = entry.count;
+			addr += 2;
+		}
+
+		save[BAG_ADDR + (2 * bag.count) + 1] = 0xFF;
+	}
 }
 
 void set_money(uint8_t *save, uint32_t amount)
@@ -120,6 +194,8 @@ void update_save(uint8_t *save, SaveData save_data)
 {
 	set_money(save, save_data.money);
 	write_string(save, PLAYER_NAME_ADDR, save_data.player_name);
+	write_string(save, ENEMY_NAME_ADDR, save_data.rival_name);
+	set_bag(save, save_data.bag);
 	set_checksum(save);
 }
 
@@ -127,8 +203,10 @@ SaveData get_save_data(uint8_t *save)
 {
 	SaveData save_data;
 	
+	save_data.rival_name = get_rival_name(save);
 	save_data.player_name = get_player_name(save);
 	save_data.money = get_money(save);
+	save_data.bag = get_bag(save);
 
 	return save_data;
 }
